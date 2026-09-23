@@ -33,64 +33,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN")
-WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID") 
-WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")
+# WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN")
+# WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID") 
+# WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")
+
+GREEN_API_URL = os.getenv("GREEN_API_URL")
+GREEN_API_ID = os.getenv("GREEN_API_ID")
+GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
+
+def format_phone_number(phone: str) -> str:
+    if not phone.endswith("@c.us"):
+        return f"{phone}@c.us"
+    return phone
 
 def send_wa_text(to_number: str, text: str):
-    url = f"https://graph.facebook.com/v17.0/{WA_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization" : f"Bearer {WA_ACCESS_TOKEN}",
-        "Content-Type" : "application/json"
-    }
+    chat_id = format_phone_number(to_number)
+    url = f"{GREEN_API_URL}/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
+    
     payload = {
-        "messaging_product" : "whatsapp",
-        "to" : to_number,
-        "type" : "text",
-        "text" : {"body" : text}
+        "chatId": chat_id,
+        "message": text
     }
-    response = requests.post(url, headers=headers, json=payload)
-    print(f"Meta Send Text Response: {response.text}")
+    response = requests.post(url, json=payload)
+    print(f"Green API Text Response: {response.text}")
 
 def send_wa_document(to_number: str, file_path: str, caption: str):
+    chat_id = format_phone_number(to_number)
+    url = f"{GREEN_API_URL}/waInstance{GREEN_API_ID}/sendFileByUpload/{GREEN_API_TOKEN}"
 
-    upload_url = f"https://graph.facebook.com/v17.0/{WA_PHONE_NUMBER_ID}/media"
-    headers = {"Authorization" : f"Bearer {WA_ACCESS_TOKEN}"}
-
-    mime_type = "application/pdf" if file_path.endswith('.pdf') else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    payload = {
+        "chatId": chat_id,
+        "caption": caption
+    }
 
     with open(file_path, "rb") as f:
-        files = {"file": (os.path.basename(file_path), f, mime_type)}
-        data = {"messaging_product": "whatsapp"}
-
-        upload_res = requests.post(upload_url, headers=headers, data=data, files=files)
-        print(f"Meta Upload Response: {upload_res.text}")
-
-    upload_data = upload_res.json()
-    media_id = upload_data.get("id")
-
-    if not media_id:
-        send_wa_text(to_number, "Maaf, terjadi kesalahan saat mengunggah dokumen ke WhatsApp.")
-        return
-
-    send_url = f"https://graph.facebook.com/v17.0/{WA_PHONE_NUMBER_ID}/messages"
-    headers_send = {
-        "Authorization": f"Bearer {WA_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "document",
-        "document": {
-            "id": media_id,
-            "caption": caption,
-            "filename": os.path.basename(file_path)
-        }
-    }
-    response = requests.post(send_url, headers=headers_send, json=payload)
-    print(f"Meta Send Doc Response: {response.text}")
-
+        files = {"file": (os.path.basename(file_path), f)}
+        upload_res = requests.post(url, data=payload, files=files)
+        print(f"Green API Doc Response: {upload_res.text}")
+    
 def process_wa_message(sender_phone: str, message_text: str):
     time_now = datetime.now().strftime("%d %B %Y")
 
@@ -172,7 +152,7 @@ async def verify_webhook(request: Request):
     challenge = request.query_params.get("hub.challenge")
 
     if mode and token:
-        if mode == "subscribe" and token == WA_VERIFY_TOKEN:
+        if mode == "subscribe" and token == GREEN_API_TOKEN:
             print("Webhook is verified by Meta")
             return int(challenge)
         else:
@@ -184,19 +164,34 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
     try:
         body = await request.json()
 
-        print("LOG WEBHOOK META:", json.dumps(body, indent=2))
+        print("=== LOG PAYLOAD GREEN API ===")
+        print(json.dumps(body, indent=4))
+        print("=============================")
 
-        if body.get("object") == "whatsapp_business_account":
-            for entry in body.get("entry", []):
-                for change in entry.get("changes", []):
-                    value = change.get("value", {})
-                    if "messages" in value:
-                        msg = value["messages"][0]
-                        sender_phone = msg["from"]
+        print("GREEN API webhook connected!")
 
-                        if msg["type"] == "text":
-                            message_text = msg["text"]["body"]
-                            background_tasks.add_task(process_wa_message, sender_phone, message_text)
+        type_webhook = body.get("typeWebhook")
+
+        if type_webhook in ["incomingMessageReveived", "outgoingMessageReceived"]:
+            sender_phone = body["senderData"]["sender"]
+            message_data = body.get("messageData", {})
+            type_message = message_data.get("typeMessage")
+
+            message_text = ""
+
+            if type_message == "textMessage":
+                message_text = message_data["textMessagedata"]["textMessage"]
+            elif type_message == "extendedTextMessage":
+                message_text = message_data["extendedTextMessage"]["text"]
+
+            if message_text:
+                background_tasks.add_task(process_wa_message, sender_phone, message_text)
+
+        #     if message_data.get("typeMessage") == "textMessage":
+        #         message_text = message_data["textMessageData"]["textMessage"]
+
+        #         background_tasks.add_task(process_wa_message, sender_phone, message_text)
+
         return {"status": "ok"}
     except Exception as e:
         print(f"Error webhook: {e}")

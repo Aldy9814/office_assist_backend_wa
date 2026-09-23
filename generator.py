@@ -5,90 +5,53 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from xhtml2pdf import pisa
 from datetime import datetime
 
+import sqlite3
+
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 
-def generate_report(intent, file_format, filter_val=None):
+def get_db_connection():
+    return sqlite3.connect('office_data.db')
+
+def generate_report(intent, file_format, keyword=None):
+    conn = get_db_connection()
+    df = pd.DataFrame()
+
     try:
-        db = firestore.client()
-        print(f"Reading Data..")
-        data_list=[]
 
         # Attendance
         if intent == 'tarik_absen':
-            docs = db.collection('absen_dummy').stream()
-            for doc in docs:
-                doc_data = doc.to_dict()
+            query = f"SELECT * FROM attendance WHERE tanggal LIKE '{keyword}-%'"
+            print(f"Menjalankan query: {query}")
+            df = pd.read_sql_query(query, conn)
 
-                if 'tanggal' in doc_data:
-                    date_str = doc_data['tanggal']
-                    doc_month = date_str[:7]
-
-                    if doc_month == filter_val:
-                        data_list.append({
-                            "Tanggal": date_str,
-                            "ID_Karyawan": doc_data.get("id_karyawan", "-"),
-                            "Nama": doc_data.get("nama", "-"),
-                            "Departemen": doc_data.get("departemen", "-"),
-                            "Status": doc_data.get("status", "-"),
-                            "Jam_Masuk": doc_data.get("jam_masuk", "-"),
-                            "Jam_Keluar": doc_data.get("jam_keluar", "-")
-                        })
-            filename_base = f"Laporan_Absen_{filter_val}"
-
-        # Inventory
         elif intent == 'tarik_inventaris':
-            docs = db.collection('inventaris_dummy').stream()
-            for doc in docs:
-                doc_data = doc.to_dict()
+            if keyword and keyword.lower() != "null":
+                search_term = f"%{keyword}%"
+                query = f"SELECT * FROM inventaris WHERE nama_barang LIKE '{search_term}' OR kategori LIKE '{search_term}' OR pemegang LIKE '{search_term}'"
+                print(f"Menjalankan query: {query}")
+                df = pd.read_sql_query(query, conn)
+            else:
+                query = "SELECT * FROM inventaris"
+                print(f"Menjalankan query: {query}")
+                df = pd.read_sql_query(query, conn)
 
-                cocok = True
-                if filter_val and filter_val != "null":
-                    keyword = filter_val.lower()
+    finally:
+        conn.close()
 
-                    name = doc_data.get("nama_barang", "").lower()
-                    category = doc_data.get("kategori", "").lower()
 
-                    synonyms = {
-                        "laptop": ["laptop", "macbook", "thinkpad"],
-                        "komputer": ["laptop", "macbook", "monitor"],
-                        "wifi": ["router", "mikrotik", "kabel"],
-                        "internet": ["router", "mikrotik", "kabel"],
-                        "mebel": ["meja", "kursi", "papan"],
-                        "furniture": ["meja", "kursi", "papan"]
-                    }
-                
-                    search_terms = synonyms.get(keyword, [keyword])
+    print(f"📊 JUMLAH DATA DITEMUKAN: {len(df)}")
 
-                    found = False
-                    for term in search_terms:
-                        if term in name or term in category:
-                            found = True
-                            break 
+    if df.empty:
+        return None
 
-                    if not found:
-                        cocok = False
+    filename_base = f"Laporan_{intent}"
+    if keyword and keyword.lower() != "null":
+        filename_base += f"_{keyword}"
 
-                if cocok:
-                    data_list.append({
-                        "ID Barang": doc_data.get("id_barang", "-"),
-                        "Nama Barang": doc_data.get("nama_barang", "-"),
-                        "Kategori": doc_data.get("kategori", "-"),
-                        "Jumlah": doc_data.get("jumlah", 0),
-                        "Kondisi": doc_data.get("kondisi", "-"),
-                        "Lokasi": doc_data.get("lokasi", "-"),
-                        "Tgl Pengadaan": doc_data.get("tanggal_pengadaan", "-")
-                    })
-
-            suffix = f"_{filter_val}" if filter_val and filter_val != "null" else "_Semua"
-            filename_base = f"Laporan_Inventaris{suffix}"
-
-        print(f"📊 JUMLAH DATA DITEMUKAN: {len(data_list)}")
-        if not data_list:
-            return None
-
-        df = pd.DataFrame(data_list)
-
+    filter_val = keyword
+    
+    try:
         if file_format.lower() == "excel":
             file_path = f"{filename_base}.xlsx"
 
@@ -165,7 +128,7 @@ def generate_report(intent, file_format, filter_val=None):
                         border-bottom: 2px solid #203764;
                         padding-bottom: 10px;
                     }}
-                    
+                        
                     table {{ 
                         width: 100%; 
                         border: 0.5px solid #000000;
@@ -188,7 +151,7 @@ def generate_report(intent, file_format, filter_val=None):
             <body>
                 <div class="header-title">{judul_laporan}</div>
                 <div class="header-subtitle">Periode/Filter: {periode}</div>
-                
+                    
                 {html_table}
             </body>
             </html>
@@ -206,8 +169,9 @@ def generate_report(intent, file_format, filter_val=None):
                 print(f"Success! PDF is saved in: {os.path.abspath(file_path)}")
                 return file_path
             
-    except FileNotFoundError:
-        print("Error: file {DATABASE_FILE} not found")
+    except Exception as e:
+        print("Error generating report: {e}")
+        return None
     
 
 

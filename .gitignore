@@ -4,3 +4,9 @@ venv/
 __pycache__/
 *.pdf
 *.xlsx
+
+local_test.py
+
+# DB Dummy
+*.db
+office_data.db
