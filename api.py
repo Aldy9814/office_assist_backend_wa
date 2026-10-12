@@ -33,10 +33,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN")
-# WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID") 
-# WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN")
-
 GREEN_API_URL = os.getenv("GREEN_API_URL")
 GREEN_API_ID = os.getenv("GREEN_API_ID")
 GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
@@ -186,11 +182,6 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
 
             if message_text:
                 background_tasks.add_task(process_wa_message, sender_phone, message_text)
-
-        #     if message_data.get("typeMessage") == "textMessage":
-        #         message_text = message_data["textMessageData"]["textMessage"]
-
-        #         background_tasks.add_task(process_wa_message, sender_phone, message_text)
 
         return {"status": "ok"}
     except Exception as e:
