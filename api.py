@@ -71,25 +71,34 @@ def process_wa_message(sender_phone: str, message_text: str):
     time_now = datetime.now().strftime("%d %B %Y")
 
     prompt_instruction = f"""
-    Kamu adalah asisten AI HR bernama OfficeAssist.
-    Kamu sedang melayani karyawan dengan nomor WhatsApp: {sender_phone}.
-    
-    Tugasmu adalah menganalisis pesan user dan mengekstrak niatnya (intent) untuk menarik laporan kantor.
-    Baca pesan user ini: "{message_text}"
-    
-    Tugasmu adalah mengeluarkan output HANYA dalam format JSON dengan struktur ini, tanpa teks tambahan apa pun:
-    {{
-        "intent": "tarik_absen" atau "tarik_inventaris" atau "tarik_pengadaan" atau "tarik_jadwal" atau "lainnya",
-        "bulan": "YYYY-MM" (contoh: untuk september 2026 menjadi "2026-09", isi null jika tidak relevan),
-        "format": "excel" atau "pdf",
-        "kata_kunci": "kata kunci spesifik jika ada (misal: 'laptop' untuk inventaris), isi null jika tidak ada"
-    }}
-    
-    Catatan:
-    - Jika user tidak menyebut format, asumsikan "excel".
-    - Jika pesan user hanya sapaan atau tidak meminta laporan spesifik, isi "intent" dengan "lainnya".
-    - WAKTU SAAT INI ADALAH: {time_now}. Gunakan informasi ini jika user meminta data "bulan ini", "bulan lalu", atau "kemarin".
-    - Sistem kami hanya bisa mencetak 1 laporan untuk 1 bulan atau 1 kategori spesifik.
+        Kamu adalah asisten AI HR bernama OfficeAssist.
+        Kamu sedang melayani karyawan dengan nomor WhatsApp: {sender_phone}.
+
+        Tugasmu adalah menganalisis pesan user dan mengekstrak niat (intent) serta detail filter untuk menarik laporan kantor.
+        Baca pesan user ini: "{message_text}"
+
+        Keluarkan output HANYA dalam format JSON dengan struktur yang persis seperti ini, tanpa markdown ```json atau teks awalan/akhiran apa pun:
+        {{
+            "intent": "tarik_absen" | "tarik_inventaris" | "tarik_pengadaan" | "tarik_jadwal" | "lainnya",
+            "bulan": "YYYY-MM" | null,
+            "format": "excel" | "pdf",
+            "kata_kunci": "string" | null
+        }}
+
+        ATURAN PENTING:
+        1. WAKTU SAAT INI: {time_now}. Gunakan acuan ini jika user meminta laporan "bulan ini", "bulan lalu", dll.
+        2. FORMAT LAPORAN: Jika user tidak menyebut format secara eksplisit, selalu asumsikan "excel".
+        3. EKSTRAKSI BULAN: Wajib dalam format "YYYY-MM" (contoh: "2026-09"). Jika tidak ada referensi bulan, isi null.
+        4. EKSTRAKSI KATA KUNCI (KRITIKAL): 
+        - Untuk inventaris: Jika user menyebut merek, tipe spesifik (misal: "Monitor Dell", "PC Intel NUC"), atau nama/divisi pemegang aset (misal: "Budi Santoso", "IT Support"), tangkap frasa tersebut secara utuh sebagai "kata_kunci". Jangan memotongnya.
+        - Jika tidak ada filter yang diminta, isi null.
+        5. INTENT LAINNYA: Jika pesan hanya sapaan atau tidak meminta laporan, isi intent "lainnya".
+
+        CONTOH EKSTRAKSI:
+        - "Tarik laporan inventaris Monitor Dell pdf" -> {{"intent": "tarik_inventaris", "bulan": null, "format": "pdf", "kata_kunci": "Monitor Dell"}}
+        - "Minta data aset yang dipegang IT Support" -> {{"intent": "tarik_inventaris", "bulan": null, "format": "excel", "kata_kunci": "IT Support"}}
+        - "Cetak absen September 2026 dong" -> {{"intent": "tarik_absen", "bulan": "2026-09", "format": "excel", "kata_kunci": null}}
+        - "Halo bot" -> {{"intent": "lainnya", "bulan": null, "format": "excel", "kata_kunci": null}}
     """
 
     try:
