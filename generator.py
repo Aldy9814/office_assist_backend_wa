@@ -20,12 +20,7 @@ def generate_report(intent, file_format, keyword=None):
     try:
 
         # Attendance
-        if intent == 'tarik_absen':
-            query = f"SELECT * FROM attendance WHERE tanggal LIKE '{keyword}-%'"
-            print(f"Menjalankan query: {query}")
-            df = pd.read_sql_query(query, conn)
-
-        elif intent == 'tarik_inventaris':
+        if intent == 'tarik_inventaris':
             if keyword and keyword.lower() != "null":
                 search_term = f"%{keyword}%"
                 query = f"SELECT * FROM inventaris WHERE nama_barang LIKE '{search_term}' OR kategori LIKE '{search_term}' OR pemegang LIKE '{search_term}'"

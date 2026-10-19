@@ -3,30 +3,44 @@ import os
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from xhtml2pdf import pisa
-import sqlite3
+from sqlalchemy import create_engine
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_URL = os.getenv("DATABASE_URL")
+engine = create_engine(DB_URL)
 
 def get_db_connection():
-    return sqlite3.connect('office_data.db')
+    return engine.connect()
 
-def handle_tarik_absen(conn, keyword):
-    query = f"SELECT * FROM attendance WHERE tanggal LIKE '{keyword}-%'"
-    print(f"Menjalankan query: {query}")
-    df = pd.read_sql_query(query, conn)
+# def handle_tarik_absen(conn, keyword):
+#     query = f"SELECT * FROM attendance WHERE tanggal LIKE '{keyword}-%%'"
+#     print(f"Menjalankan query: {query}")
+#     df = pd.read_sql_query(query, conn)
 
-    filename_base = f"Laporan_Absen_{keyword}" if keyword and keyword.lower() != "null" else "Laporan_Absen"
-    judul_laporan = "Laporan Kehadiran Karyawan"
+#     filename_base = f"Laporan_Absen_{keyword}" if keyword and keyword.lower() != "null" else "Laporan_Absen"
+#     judul_laporan = "Laporan Kehadiran Karyawan"
 
-    return df, filename_base, judul_laporan
+#     return df, filename_base, judul_laporan
 
 def handle_tarik_inventaris(conn, keyword):
+    # Menggunakan LEFT JOIN untuk mengambil nama_lengkap dari tabel karyawan sebagai 'pemegang'
+    base_query = """
+        SELECT i.kode_barang, i.nama_barang, i.kategori, i.kondisi, k.nama_lengkap AS pemegang 
+        FROM inventaris i 
+        LEFT JOIN karyawan k ON i.id_karyawan = k.id_karyawan
+    """
+    
     if keyword and keyword.lower() != "null":
-        search_term = f"%{keyword}%"
-        query = f"SELECT * FROM inventaris WHERE nama_barang LIKE '{search_term}' OR kategori LIKE '{search_term}' OR pemegang LIKE '{search_term}'"
+        search_term = f"%%{keyword}%%"
+        # Pencarian difokuskan ke nama_barang, kategori, atau k.nama_lengkap (bukan kolom pemegang)
+        query = f"{base_query} WHERE i.nama_barang LIKE '{search_term}' OR i.kategori LIKE '{search_term}' OR k.nama_lengkap LIKE '{search_term}'"
         print(f"Menjalankan query: {query}")
         df = pd.read_sql_query(query, conn)
         filename_base = f"Laporan_Inventaris_{keyword}"
     else:
-        query = "SELECT * FROM inventaris"
+        query = base_query
         print(f"Menjalankan query: {query}")
         df = pd.read_sql_query(query, conn)
         filename_base = "Laporan_Inventaris_Lengkap"
@@ -37,7 +51,7 @@ def handle_tarik_inventaris(conn, keyword):
 
 
 INTENT_ROUTES = {
-    "tarik_absen": handle_tarik_absen,
+    # "tarik_absen": handle_tarik_absen,
     "tarik_inventaris": handle_tarik_inventaris
 }
 

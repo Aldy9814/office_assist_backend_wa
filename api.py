@@ -79,26 +79,22 @@ def process_wa_message(sender_phone: str, message_text: str):
 
         Keluarkan output HANYA dalam format JSON dengan struktur yang persis seperti ini, tanpa markdown ```json atau teks awalan/akhiran apa pun:
         {{
-            "intent": "tarik_absen" | "tarik_inventaris" | "tarik_pengadaan" | "tarik_jadwal" | "lainnya",
-            "bulan": "YYYY-MM" | null,
+            "intent": "tarik_inventaris" | "tarik_pengadaan" | "tarik_jadwal" | "lainnya",
             "format": "excel" | "pdf",
             "kata_kunci": "string" | null
         }}
 
         ATURAN PENTING:
-        1. WAKTU SAAT INI: {time_now}. Gunakan acuan ini jika user meminta laporan "bulan ini", "bulan lalu", dll.
-        2. FORMAT LAPORAN: Jika user tidak menyebut format secara eksplisit, selalu asumsikan "excel".
-        3. EKSTRAKSI BULAN: Wajib dalam format "YYYY-MM" (contoh: "2026-09"). Jika tidak ada referensi bulan, isi null.
-        4. EKSTRAKSI KATA KUNCI (KRITIKAL): 
+        1. FORMAT LAPORAN: Jika user tidak menyebut format secara eksplisit, selalu asumsikan "excel".
+        2. EKSTRAKSI KATA KUNCI (KRITIKAL): 
         - Untuk inventaris: Jika user menyebut merek, tipe spesifik (misal: "Monitor Dell", "PC Intel NUC"), atau nama/divisi pemegang aset (misal: "Budi Santoso", "IT Support"), tangkap frasa tersebut secara utuh sebagai "kata_kunci". Jangan memotongnya.
         - Jika tidak ada filter yang diminta, isi null.
-        5. INTENT LAINNYA: Jika pesan hanya sapaan atau tidak meminta laporan, isi intent "lainnya".
+        3. INTENT LAINNYA: Jika pesan hanya sapaan atau tidak meminta laporan inventaris, isi intent "lainnya".
 
         CONTOH EKSTRAKSI:
-        - "Tarik laporan inventaris Monitor Dell pdf" -> {{"intent": "tarik_inventaris", "bulan": null, "format": "pdf", "kata_kunci": "Monitor Dell"}}
-        - "Minta data aset yang dipegang IT Support" -> {{"intent": "tarik_inventaris", "bulan": null, "format": "excel", "kata_kunci": "IT Support"}}
-        - "Cetak absen September 2026 dong" -> {{"intent": "tarik_absen", "bulan": "2026-09", "format": "excel", "kata_kunci": null}}
-        - "Halo bot" -> {{"intent": "lainnya", "bulan": null, "format": "excel", "kata_kunci": null}}
+        - "Tarik laporan inventaris Monitor Dell pdf" -> {{"intent": "tarik_inventaris", "format": "pdf", "kata_kunci": "Monitor Dell"}}
+        - "Minta data aset yang dipegang IT Support" -> {{"intent": "tarik_inventaris", "format": "excel", "kata_kunci": "IT Support"}}
+        - "Halo bot" -> {{"intent": "lainnya", "format": "excel", "kata_kunci": null}}
     """
 
     try:
@@ -116,21 +112,7 @@ def process_wa_message(sender_phone: str, message_text: str):
         bulan = extraction_result.get("bulan")
         keyword = extraction_result.get("kata_kunci")
 
-        if intent == 'tarik_absen':
-            if not bulan or bulan == "null" or bulan == "":
-                send_wa_text(sender_phone, "Data bulan apa yang diinginkan? Tolong sebutkan bulannya ya")
-                return
-
-            send_wa_text(sender_phone, f"Tungu sebentar, menyiapkan laporan absen untuk bulan {bulan}...")
-            file_path = generate_report(intent, file_format, bulan)
-
-            if file_path and os.path.exists(file_path):
-                caption = f"Siap, laporan untuk bulan {bulan} dengan format {file_format.upper()} sudah saya siapkan"
-                send_wa_document(sender_phone, file_path, caption)
-            else:
-                send_wa_text(sender_phone, "Maaf, sepertinya belum ada data yang masuk pada bulan tersebut")
-
-        elif intent == 'tarik_inventaris':
+        if intent == 'tarik_inventaris':
             send_wa_text(sender_phone, "Tunggu sebentar, sedang menarik data inventaris")
             file_path = generate_report(intent, file_format, keyword)
 
@@ -142,8 +124,19 @@ def process_wa_message(sender_phone: str, message_text: str):
             else:
                 send_wa_text(sender_phone, "Maaf, data inventaris yang dicari tidak tersedia")
 
+        elif intent == 'lainnya':
+            guide_message = (
+               "Maaf, OfficeAssist belum mengenali perintah tersebut. 🤖\n\n"
+                "Saat ini, Anda bisa meminta saya untuk:\n"
+                "1. *Tarik Laporan Inventaris*\n"
+                "   Contoh: 'Cetak data aset Monitor Dell excel'\n"
+                "   Contoh: 'Minta laporan inventaris lengkap pdf'\n\n"
+                "Ketik pesan Anda dengan jelas, dan saya akan menyiapkan laporannya!"
+            )
+            send_wa_text(sender_phone, guide_message)
+
         else: 
-            send_wa_text(sender_phone, "Maaf, saat ini saya hanya dapat melayani penarikan absen dan data inventaris")
+            send_wa_text(sender_phone, "Maaf, saat ini saya hanya dapat melayani penarikan data inventaris")
 
     except Exception as e:
         print(f"Error Gemini: {e}")
