@@ -9,16 +9,20 @@ import os
 import json
 import requests
 from dotenv import load_dotenv
-from generator import generate_report
+from generator_v2 import generate_report
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
+from sqlalchemy import create_engine, text
 
 load_dotenv()
 
-my_api_key = os.getenv("GEMINI_API_KEY")
-if not my_api_key:
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
     raise ValueError("API key not found")
-client = genai.Client(api_key=my_api_key)
+client = genai.Client(api_key=api_key)
+
+DB_URL = os.getenv("DATABASE_URL")
+db_engine = create_engine(DB_URL)
 
 cred = credentials.Certificate("firebase-credentials.json")
 if not firebase_admin._apps:
@@ -68,8 +72,6 @@ def send_wa_document(to_number: str, file_path: str, caption: str):
         print(f"Green API Doc Response: {upload_res.text}")
     
 def process_wa_message(sender_phone: str, message_text: str):
-    time_now = datetime.now().strftime("%d %B %Y")
-
     prompt_instruction = f"""
         Kamu adalah asisten AI HR bernama OfficeAssist.
         Kamu sedang melayani karyawan dengan nomor WhatsApp: {sender_phone}.
@@ -81,20 +83,15 @@ def process_wa_message(sender_phone: str, message_text: str):
         {{
             "intent": "tarik_inventaris" | "tarik_pengadaan" | "tarik_jadwal" | "lainnya",
             "format": "excel" | "pdf",
-            "kata_kunci": "string" | null
+            "keyword": "string" | null
         }}
 
         ATURAN PENTING:
         1. FORMAT LAPORAN: Jika user tidak menyebut format secara eksplisit, selalu asumsikan "excel".
         2. EKSTRAKSI KATA KUNCI (KRITIKAL): 
-        - Untuk inventaris: Jika user menyebut merek, tipe spesifik (misal: "Monitor Dell", "PC Intel NUC"), atau nama/divisi pemegang aset (misal: "Budi Santoso", "IT Support"), tangkap frasa tersebut secara utuh sebagai "kata_kunci". Jangan memotongnya.
+        - Untuk inventaris: Jika user menyebut merek, tipe spesifik (misal: "Monitor Dell", "PC Intel NUC"), atau nama/divisi pemegang aset, tangkap frasa tersebut utuh sebagai "keyword".
         - Jika tidak ada filter yang diminta, isi null.
-        3. INTENT LAINNYA: Jika pesan hanya sapaan atau tidak meminta laporan inventaris, isi intent "lainnya".
-
-        CONTOH EKSTRAKSI:
-        - "Tarik laporan inventaris Monitor Dell pdf" -> {{"intent": "tarik_inventaris", "format": "pdf", "kata_kunci": "Monitor Dell"}}
-        - "Minta data aset yang dipegang IT Support" -> {{"intent": "tarik_inventaris", "format": "excel", "kata_kunci": "IT Support"}}
-        - "Halo bot" -> {{"intent": "lainnya", "format": "excel", "kata_kunci": null}}
+        3. INTENT LAINNYA: Jika pesan hanya sapaan atau tidak meminta laporan, isi intent "lainnya".
     """
 
     try:
@@ -109,20 +106,22 @@ def process_wa_message(sender_phone: str, message_text: str):
 
         intent = extraction_result.get("intent")
         file_format = extraction_result.get("format", "excel")
-        bulan = extraction_result.get("bulan")
-        keyword = extraction_result.get("kata_kunci")
+        keyword = extraction_result.get("keyword")
+        
+        response_status = "success"
 
         if intent == 'tarik_inventaris':
             send_wa_text(sender_phone, "Tunggu sebentar, sedang menarik data inventaris")
             file_path = generate_report(intent, file_format, keyword)
 
             if file_path and os.path.exists(file_path):
-                messages = f"Siap, laporan inventaris dengan format {file_format.upper()} sudah disiapkan"
+                messages = f"Siap, laporan inventaris dengan format {file_format.upper()} sudah disiapkan."
                 if keyword and keyword != "null":
-                    messages = f"siap, laporan inventaris untuk '{keyword}' dengan format {file_format.upper()} sudah disiapkan"
+                    messages = f"Siap, laporan inventaris untuk '{keyword}' dengan format {file_format.upper()} sudah disiapkan."
                 send_wa_document(sender_phone, file_path, messages)
             else:
-                send_wa_text(sender_phone, "Maaf, data inventaris yang dicari tidak tersedia")
+                send_wa_text(sender_phone, "Maaf, data inventaris yang dicari tidak tersedia.")
+                response_status = "data_not_found"
 
         elif intent == 'lainnya':
             guide_message = (
@@ -134,14 +133,37 @@ def process_wa_message(sender_phone: str, message_text: str):
                 "Ketik pesan Anda dengan jelas, dan saya akan menyiapkan laporannya!"
             )
             send_wa_text(sender_phone, guide_message)
+            response_status = "bot_guide_sent"
 
         else: 
-            send_wa_text(sender_phone, "Maaf, saat ini saya hanya dapat melayani penarikan data inventaris")
+            send_wa_text(sender_phone, "Maaf, saat ini saya hanya dapat melayani penarikan data inventaris.")
+            response_status = "unrecognized_intent"
+
+        with db_engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO audit_logs (whatsapp_number, incoming_message, detected_intent, response_status)
+                VALUES (:wa, :msg, :intent, :status)
+            """), {
+                "wa": sender_phone,
+                "msg": message_text,
+                "intent": intent,
+                "status": response_status
+            })
 
     except Exception as e:
-        print(f"Error Gemini: {e}")
-        send_wa_text(sender_phone, "Sistem sedang mengalami gangguan. Coba lagi nanti")
-
+        print(f"Error Gemini / Processing: {e}")
+        send_wa_text(sender_phone, "Sistem sedang mengalami gangguan. Coba lagi nanti.")
+        
+        with db_engine.begin() as conn:
+            conn.execute(text("""
+                INSERT INTO audit_logs (whatsapp_number, incoming_message, detected_intent, response_status)
+                VALUES (:wa, :msg, :intent, :status)
+            """), {
+                "wa": sender_phone,
+                "msg": message_text,
+                "intent": "error",
+                "status": "system_error"
+            })
 
 @app.get("/webhook")
 async def verify_webhook(request: Request):
@@ -161,12 +183,9 @@ async def verify_webhook(request: Request):
 async def receive_message(request: Request, background_tasks: BackgroundTasks):
     try:
         body = await request.json()
-
         print("=== LOG PAYLOAD GREEN API ===")
         print(json.dumps(body, indent=4))
         print("=============================")
-
-        print("GREEN API webhook connected!")
 
         type_webhook = body.get("typeWebhook")
 
@@ -178,7 +197,7 @@ async def receive_message(request: Request, background_tasks: BackgroundTasks):
             message_text = ""
 
             if type_message == "textMessage":
-                message_text = message_data["textMessagedata"]["textMessage"]
+                message_text = message_data["textMessageData"]["textMessage"]
             elif type_message == "extendedTextMessage":
                 message_text = message_data["extendedTextMessage"]["text"]
 
@@ -196,5 +215,3 @@ async def download_file(filename: str):
     if os.path.exists(save_filename):
         return FileResponse(path=save_filename, filename=save_filename)
     raise HTTPException(status_code=404, detail="File not found")
-
-

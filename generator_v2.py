@@ -14,28 +14,16 @@ engine = create_engine(DB_URL)
 def get_db_connection():
     return engine.connect()
 
-# def handle_tarik_absen(conn, keyword):
-#     query = f"SELECT * FROM attendance WHERE tanggal LIKE '{keyword}-%%'"
-#     print(f"Menjalankan query: {query}")
-#     df = pd.read_sql_query(query, conn)
-
-#     filename_base = f"Laporan_Absen_{keyword}" if keyword and keyword.lower() != "null" else "Laporan_Absen"
-#     judul_laporan = "Laporan Kehadiran Karyawan"
-
-#     return df, filename_base, judul_laporan
-
 def handle_tarik_inventaris(conn, keyword):
-    # Menggunakan LEFT JOIN untuk mengambil nama_lengkap dari tabel karyawan sebagai 'pemegang'
     base_query = """
-        SELECT i.kode_barang, i.nama_barang, i.kategori, i.kondisi, k.nama_lengkap AS pemegang 
-        FROM inventaris i 
-        LEFT JOIN karyawan k ON i.id_karyawan = k.id_karyawan
+        SELECT i.item_code, i.item_name, i.category, i.condition_status, e.full_name AS pemegang 
+        FROM inventory i 
+        LEFT JOIN employees e ON i.employee_id = e.employee_id
     """
     
     if keyword and keyword.lower() != "null":
         search_term = f"%%{keyword}%%"
-        # Pencarian difokuskan ke nama_barang, kategori, atau k.nama_lengkap (bukan kolom pemegang)
-        query = f"{base_query} WHERE i.nama_barang LIKE '{search_term}' OR i.kategori LIKE '{search_term}' OR k.nama_lengkap LIKE '{search_term}'"
+        query = f"{base_query} WHERE i.item_name LIKE '{search_term}' OR i.category LIKE '{search_term}' OR e.full_name LIKE '{search_term}'"
         print(f"Menjalankan query: {query}")
         df = pd.read_sql_query(query, conn)
         filename_base = f"Laporan_Inventaris_{keyword}"
@@ -47,11 +35,17 @@ def handle_tarik_inventaris(conn, keyword):
 
     judul_laporan = "Laporan Inventaris Aset"
 
+    df.rename(columns={
+        'item_code': 'Kode Barang',
+        'item_name': 'Nama Barang',
+        'category': 'Kategori',
+        'condition_status': 'Kondisi',
+        'pemegang': 'Pemegang'
+    }, inplace=True)
+
     return df, filename_base, judul_laporan
 
-
 INTENT_ROUTES = {
-    # "tarik_absen": handle_tarik_absen,
     "tarik_inventaris": handle_tarik_inventaris
 }
 
@@ -73,8 +67,6 @@ def generate_report(intent, file_format, keyword=None):
     if df.empty:
         print("Data kosong, tidak ada file yang di-generate.")
         return None
-
-    filter_val = keyword
 
     try:
         if file_format.lower() == "excel":
@@ -119,7 +111,7 @@ def generate_report(intent, file_format, keyword=None):
         elif file_format.lower() == "pdf":
             file_path = f"{filename_base}.pdf"
             html_table = df.to_html(index=False, border=1, justify="center")
-            periode = filter_val if filter_val and filter_val != "null" else "Semua Data"
+            periode = keyword if keyword and keyword != "null" else "Semua Data"
 
             html_content = f"""
             <html>
@@ -155,5 +147,3 @@ def generate_report(intent, file_format, keyword=None):
     except Exception as e:
         print(f"Error saat meng-generate laporan: {e}")
         return None
-
-    
